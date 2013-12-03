@@ -253,6 +253,8 @@ class DataXceiver implements Runnable, FSConstants {
           else
             datanode.myMetrics.writesFromRemoteClient.inc();
           break;
+        case DataTransferProtocol.OP_RSYNC_CHECKSUM:
+          LOG.debug("RsyncCopy : Call OP_RSYNC_CHECKSUM");
         default:
           throw new IOException("Unknown opcode " + op + " in data stream");
         }
