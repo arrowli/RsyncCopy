@@ -85,6 +85,8 @@ public interface DataTransferProtocol {
   public static final byte OP_BLOCK_CRC = (byte) 87;
   public static final byte OP_APPEND_BLOCK = (byte) 88;
   
+  public static final byte OP_RSYNC_CHECKSUM = (byte) 101; // RsyncCopy
+  
   public static final int OP_STATUS_SUCCESS = 0;  
   public static final int OP_STATUS_ERROR = 1;  
   public static final int OP_STATUS_ERROR_CHECKSUM = 2;  
