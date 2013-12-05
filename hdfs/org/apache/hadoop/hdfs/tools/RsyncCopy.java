@@ -37,11 +37,14 @@ import java.util.concurrent.*;
 import javax.net.SocketFactory;
 import javax.security.auth.login.LoginException;
 
+import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hdfs.DFSUtil;
 import org.apache.hadoop.hdfs.LeaseRenewal;
 import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
 import org.apache.hadoop.hdfs.protocol.Block;
@@ -117,10 +120,7 @@ public class RsyncCopy {
 	final InetAddress localHost;
 	InetSocketAddress nameNodeAddr;
 
-	private String localhostNetworkLocation = null;
 	int ipTosValue = NetUtils.NOT_SET_IP_TOS;
-
-	private final DistributedFileSystem dfs;
 
 	volatile boolean clientRunning = true;
 	private ClientProtocol rpcNamenode;
@@ -128,7 +128,8 @@ public class RsyncCopy {
 	int namenodeRPCSocketTimeout;
 
 	public Object namenodeProxySyncObj = new Object();
-	final UserGroupInformation ugi;
+	private final Path testPath = new Path("/test");
+	private final DistributedFileSystem dfs=null;
 
 	/**
 	 * Create a new DFSClient connected to the given nameNodeAddr or
@@ -137,7 +138,6 @@ public class RsyncCopy {
 	RsyncCopy(InetSocketAddress nameNodeAddr, ClientProtocol rpcNamenode,
 			Configuration conf, FileSystem.Statistics stats, long uniqueId,
 			DistributedFileSystem dfs) throws IOException {
-		this.dfs = dfs;
 		this.conf = conf;
 		this.stats = stats;
 		this.socketFactory = NetUtils.getSocketFactory(conf,
@@ -163,15 +163,12 @@ public class RsyncCopy {
 		}
 
 		this.leasechecker = new LeaseChecker(this.clientName, this.conf);
-		try {
-			this.ugi = UserGroupInformation.getUGI(conf);
-		} catch (LoginException e) {
-			throw (IOException) (new IOException().initCause(e));
-		}
+
 		this.socketTimeout = conf.getInt("dfs.socket.timeout",
                 HdfsConstants.READ_TIMEOUT);
 		this.namenodeRPCSocketTimeout = conf.getInt(
 				org.apache.hadoop.hdfs.protocol.FSConstants.DFS_CLIENT_NAMENODE_SOCKET_TIMEOUT, 0);
+		dfs=DFSUtil.convertToDFS(testPath.getFileSystem(conf));
 	}
 
 	/**
@@ -217,9 +214,6 @@ public class RsyncCopy {
 		}
 		final List<LocatedBlock> locatedblocks = locatedBlocks
 				.getLocatedBlocks();
-		final DataOutputBuffer md5out = new DataOutputBuffer();
-		int bytesPerCRC = 0;
-		long crcPerBlock = 0;
 
 		// get block checksum for each block
 		for (int i = 0; i < locatedblocks.size(); i++) {
@@ -317,9 +311,7 @@ public class RsyncCopy {
 			// and the exception will likely to be resolved after a retry.
 			//
 			synchronized (namenodeProxySyncObj) {
-				createRPCNamenodeIfCompatible(nameNodeAddr, conf, ugi);
-				this.namenode = createNamenode(
-						this.rpcNamenode, conf);
+				this.namenode = dfs.getClient().getNameNodeRPC();
 			}
 		}
 		if (LOG.isDebugEnabled()) {
@@ -395,19 +387,9 @@ public class RsyncCopy {
 				rpcNamenode, methodNameToPolicyMap);
 	}
 
-	public static void main(String args[]) throws Exception {
-		Configuration conf = new Configuration();
-		InetSocketAddress nameNodeAddr = NameNode
-				.getClientProtocolAddress(conf);
-		ClientProtocol rpcNamenode = null;
-		FileSystem.Statistics stats = null;
-		long uniqueId = 0;
-		DistributedFileSystem dfs = null;
-		RsyncCopy rc = new RsyncCopy(nameNodeAddr, rpcNamenode, conf, stats,
-				uniqueId, dfs);
-		String src = "/test";
-		rc.getFileChecksum(src);
-		System.exit(0);
+	private static void printUsage() {
+		HelpFormatter formatter = new HelpFormatter();
+		formatter.printHelp("Usage : FastCopy [options] <srcs....> <dst>", null);
 	}
 
 	/** Lease management */
@@ -512,5 +494,23 @@ public class RsyncCopy {
 			IOException result = new IOException("Filesystem closed");
 			throw result;
 		}
+	}
+	
+	public static void main(String args[]) throws Exception {
+		if(args.length < 2){
+			printUsage();
+		}
+		Configuration conf = new Configuration();
+		InetSocketAddress nameNodeAddr = NameNode
+				.getClientProtocolAddress(conf);
+		ClientProtocol rpcNamenode = null;
+		FileSystem.Statistics stats = null;
+		long uniqueId = 0;
+		DistributedFileSystem dfs = null;
+		RsyncCopy rc = new RsyncCopy(nameNodeAddr, rpcNamenode, conf, stats,
+				uniqueId, dfs);
+		String src = "/test";
+		rc.getFileChecksum(src);
+		System.exit(0);
 	}
 }
