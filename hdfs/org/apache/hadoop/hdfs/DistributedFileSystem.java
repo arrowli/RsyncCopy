@@ -922,7 +922,7 @@ public class DistributedFileSystem extends FileSystem {
     return trash.moveFromTrash(f);
   }
 
-  ClientProtocol getNewNameNode(ClientProtocol rpcNamenode, Configuration conf)
+  public ClientProtocol getNewNameNode(ClientProtocol rpcNamenode, Configuration conf)
       throws IOException {
     return DFSClient.createNamenode(rpcNamenode, conf);
   }

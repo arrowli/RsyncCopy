@@ -17,65 +17,62 @@
  */
 package org.apache.hadoop.hdfs.tools;
 
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
+import java.net.Socket;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.concurrent.*;
 
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.ParseException;
-import org.apache.commons.cli.PosixParser;
-import org.apache.commons.cli.Options;
+import javax.net.SocketFactory;
+import javax.security.auth.login.LoginException;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hdfs.DFSClient;
-import org.apache.hadoop.hdfs.DFSUtil;
-import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.LeaseRenewal;
+import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
 import org.apache.hadoop.hdfs.protocol.Block;
-import org.apache.hadoop.hdfs.protocol.ClientDatanodeProtocol;
 import org.apache.hadoop.hdfs.protocol.ClientProtocol;
+import org.apache.hadoop.hdfs.protocol.BlockChecksumListHeader;
+import org.apache.hadoop.hdfs.protocol.DataTransferProtocol;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
+import org.apache.hadoop.hdfs.protocol.FSConstants;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
-import org.apache.hadoop.hdfs.protocol.LocatedBlockWithMetaInfo;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocksWithMetaInfo;
+import org.apache.hadoop.hdfs.protocol.ProtocolCompatible;
 import org.apache.hadoop.hdfs.server.common.HdfsConstants;
+import org.apache.hadoop.hdfs.server.datanode.DataNode;
 import org.apache.hadoop.hdfs.server.namenode.NameNode;
-import org.apache.hadoop.hdfs.server.namenode.NotReplicatedYetException;
+import org.apache.hadoop.io.DataOutputBuffer;
+import org.apache.hadoop.io.IOUtils;
+import org.apache.hadoop.io.retry.RetryPolicies;
+import org.apache.hadoop.io.retry.RetryPolicy;
+import org.apache.hadoop.io.retry.RetryProxy;
 import org.apache.hadoop.ipc.ProtocolProxy;
-import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.ipc.RPC;
-import org.apache.hadoop.mapred.Reporter;
-import org.apache.hadoop.security.UnixUserGroupInformation;
+import org.apache.hadoop.ipc.RemoteException;
+import org.apache.hadoop.net.NetUtils;
+import org.apache.hadoop.security.AccessControlException;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.util.Daemon;
+import org.apache.hadoop.util.StringUtils;
 
-/* from DFSClient.java */
-import javax.net.SocketFactory;
-import org.apache.hadoop.hdfs.protocol.BlockChecksumListHeader;
+/* new added */
+import org.apache.hadoop.hdfs.DistributedFileSystem;
 
 /**
  * There is a need to perform fast file copy on HDFS (primarily for the purpose
@@ -102,9 +99,8 @@ import org.apache.hadoop.hdfs.protocol.BlockChecksumListHeader;
 
 public class RsyncCopy {
 
-	public static final Log LOG = LogFactory.getLog(DFSClient.class);
+	public static final Log LOG = LogFactory.getLog(RsyncCopy.class);
 	public ClientProtocol namenode;
-	private ClientProtocol rpcNamenode;
 	// Namenode proxy that supports method-based compatibility
 	public ProtocolProxy<ClientProtocol> namenodeProtocolProxy = null;
 	static Random r = new Random();
@@ -124,9 +120,15 @@ public class RsyncCopy {
 	private String localhostNetworkLocation = null;
 	int ipTosValue = NetUtils.NOT_SET_IP_TOS;
 
-	final BlockLocationRenewal blockLocationRenewal;
-
 	private final DistributedFileSystem dfs;
+
+	volatile boolean clientRunning = true;
+	private ClientProtocol rpcNamenode;
+	int socketTimeout;
+	int namenodeRPCSocketTimeout;
+
+	public Object namenodeProxySyncObj = new Object();
+	final UserGroupInformation ugi;
 
 	/**
 	 * Create a new DFSClient connected to the given nameNodeAddr or
@@ -161,11 +163,15 @@ public class RsyncCopy {
 		}
 
 		this.leasechecker = new LeaseChecker(this.clientName, this.conf);
-		if (conf.getBoolean("dfs.client.block.location.renewal.enabled", false)) {
-			this.blockLocationRenewal = new BlockLocationRenewal();
-		} else {
-			this.blockLocationRenewal = null;
+		try {
+			this.ugi = UserGroupInformation.getUGI(conf);
+		} catch (LoginException e) {
+			throw (IOException) (new IOException().initCause(e));
 		}
+		this.socketTimeout = conf.getInt("dfs.socket.timeout",
+                HdfsConstants.READ_TIMEOUT);
+		this.namenodeRPCSocketTimeout = conf.getInt(
+				org.apache.hadoop.hdfs.protocol.FSConstants.DFS_CLIENT_NAMENODE_SOCKET_TIMEOUT, 0);
 	}
 
 	/**
@@ -178,7 +184,7 @@ public class RsyncCopy {
 	 */
 	void getFileChecksum(String src) throws IOException {
 		checkOpen();
-		return getFileChecksum(dataTransferVersion, src, namenode,
+		getFileChecksum(dataTransferVersion, src, namenode,
 				namenodeProtocolProxy, socketFactory, socketTimeout);
 	}
 
@@ -241,7 +247,7 @@ public class RsyncCopy {
 
 					out = new DataOutputStream(new BufferedOutputStream(
 							NetUtils.getOutputStream(sock),
-							DataNode.SMALL_BUFFER_SIZE));
+							FSConstants.SMALL_BUFFER_SIZE));
 					in = new DataInputStream(NetUtils.getInputStream(sock));
 
 					// get block MD5
@@ -367,7 +373,7 @@ public class RsyncCopy {
 	static ClientProtocol createNamenode(ClientProtocol rpcNamenode,
 			Configuration conf) throws IOException {
 		long sleepTime = conf.getLong("dfs.client.rpc.retry.sleep",
-				LEASE_SOFTLIMIT_PERIOD);
+				org.apache.hadoop.hdfs.protocol.FSConstants.LEASE_SOFTLIMIT_PERIOD);
 		RetryPolicy createPolicy = RetryPolicies
 				.retryUpToMaximumCountWithFixedSleep(5, sleepTime,
 						TimeUnit.MILLISECONDS);
@@ -392,7 +398,7 @@ public class RsyncCopy {
 
 	public static void main(String args[]) throws Exception {
 		Configuration conf = new Configuration();
-		InetSocketAddress nameNodeAddr = Namenode
+		InetSocketAddress nameNodeAddr = NameNode
 				.getClientProtocolAddress(conf);
 		ClientProtocol rpcNamenode = null;
 		FileSystem.Statistics stats = null;
@@ -405,26 +411,107 @@ public class RsyncCopy {
 		System.exit(0);
 	}
 
-	/**
-	 * Renews the lease for the files that are being copied.
-	 */
-	public class LeaseChecker extends LeaseRenewal {
+	/** Lease management */
+	class LeaseChecker extends LeaseRenewal {
+		/**
+		 * A map from src -> DFSOutputStream of files that are currently being
+		 * written by this client.
+		 */
+		private final SortedMap<String, OutputStream> pendingCreates = new TreeMap<String, OutputStream>();
 
-		private final ClientProtocol namenode;
+		private Daemon daemon = null;
 
-		public LeaseChecker(ClientProtocol namenode) {
+		public LeaseChecker(String clientName, Configuration conf) {
 			super(clientName, conf);
-			this.namenode = namenode;
+		}
+
+		synchronized void put(String src, OutputStream out) {
+			if (clientRunning) {
+				if (daemon == null) {
+					daemon = new Daemon(this);
+					daemon.start();
+				}
+				pendingCreates.put(src, out);
+			}
+		}
+
+		synchronized void remove(String src) {
+			pendingCreates.remove(src);
+		}
+
+		void interruptAndJoin() throws InterruptedException {
+			Daemon daemonCopy = null;
+			synchronized (this) {
+				if (daemon != null) {
+					daemon.interrupt();
+					daemonCopy = daemon;
+				}
+			}
+
+			if (daemonCopy != null) {
+				LOG.debug("Wait for lease checker to terminate");
+				daemonCopy.join();
+			}
+		}
+
+		synchronized void close() {
+			while (!pendingCreates.isEmpty()) {
+				String src = pendingCreates.firstKey();
+				OutputStream out = pendingCreates.remove(src);
+				if (out != null) {
+					try {
+						out.close();
+					} catch (IOException ie) {
+						LOG.error("Exception closing file " + src + " : " + ie,
+								ie);
+					}
+				}
+			}
+		}
+
+		/**
+		 * Abort all open files. Release resources held. Ignore all errors.
+		 */
+		@Override
+		protected synchronized void abort() {
+			super.closeRenewal();
+			clientRunning = false;
+			while (!pendingCreates.isEmpty()) {
+				String src = pendingCreates.firstKey();
+			}
+			RPC.stopProxy(rpcNamenode); // close connections to the namenode
 		}
 
 		@Override
 		protected void renew() throws IOException {
+			synchronized (this) {
+				if (pendingCreates.isEmpty()) {
+					return;
+				}
+			}
 			namenode.renewLease(clientName);
 		}
 
+		/** {@inheritDoc} */
 		@Override
-		protected void abort() {
-			// Do nothing.
+		public String toString() {
+			String s = getClass().getSimpleName();
+			if (LOG.isTraceEnabled()) {
+				return s
+						+ "@"
+						+ RsyncCopy.this
+						+ ": "
+						+ StringUtils.stringifyException(new Throwable(
+								"for testing"));
+			}
+			return s;
+		}
+	}
+
+	protected void checkOpen() throws IOException {
+		if (!clientRunning) {
+			IOException result = new IOException("Filesystem closed");
+			throw result;
 		}
 	}
 }
