@@ -318,9 +318,8 @@ public class RsyncCopy {
 			//
 			synchronized (namenodeProxySyncObj) {
 				createRPCNamenodeIfCompatible(nameNodeAddr, conf, ugi);
-				this.namenode = (dfs == null) ? createNamenode(
-						this.rpcNamenode, conf) : dfs.getNewNameNode(
-						rpcNamenode, conf);
+				this.namenode = createNamenode(
+						this.rpcNamenode, conf);
 			}
 		}
 		if (LOG.isDebugEnabled()) {
