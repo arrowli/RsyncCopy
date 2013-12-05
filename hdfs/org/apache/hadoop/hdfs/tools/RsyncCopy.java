@@ -267,7 +267,7 @@ public class RsyncCopy {
 					}
 
 					// read data
-					
+
 				} catch (IOException ie) {
 					LOG.warn("src=" + src + ", datanodes[" + j + "].getName()="
 							+ datanodes[j].getName(), ie);
@@ -389,17 +389,42 @@ public class RsyncCopy {
 		return (ClientProtocol) RetryProxy.create(ClientProtocol.class,
 				rpcNamenode, methodNameToPolicyMap);
 	}
-	
-	public static void main(String args[])throw Exception{
+
+	public static void main(String args[]) throws Exception {
 		Configuration conf = new Configuration();
-		InetSocketAddress nameNodeAddr = Namenode.getClientProtocolAddress(conf);
+		InetSocketAddress nameNodeAddr = Namenode
+				.getClientProtocolAddress(conf);
 		ClientProtocol rpcNamenode = null;
 		FileSystem.Statistics stats = null;
 		long uniqueId = 0;
 		DistributedFileSystem dfs = null;
-		RsyncCopy rc = new RsyncCopy(nameNodeAddr,rpcNamenode,conf,stats,uniqueId,dfs);
+		RsyncCopy rc = new RsyncCopy(nameNodeAddr, rpcNamenode, conf, stats,
+				uniqueId, dfs);
 		String src = "/test";
 		rc.getFileChecksum(src);
 		System.exit(0);
+	}
+
+	/**
+	 * Renews the lease for the files that are being copied.
+	 */
+	public class LeaseChecker extends LeaseRenewal {
+
+		private final ClientProtocol namenode;
+
+		public LeaseChecker(ClientProtocol namenode) {
+			super(clientName, conf);
+			this.namenode = namenode;
+		}
+
+		@Override
+		protected void renew() throws IOException {
+			namenode.renewLease(clientName);
+		}
+
+		@Override
+		protected void abort() {
+			// Do nothing.
+		}
 	}
 }
