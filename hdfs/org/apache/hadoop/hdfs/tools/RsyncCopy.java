@@ -267,6 +267,8 @@ public class RsyncCopy {
 					}
 
 					// read data
+					final long data = in.readLong();
+					LOG.info("Rsynccopy received " + data);
 
 				} catch (IOException ie) {
 					LOG.warn("src=" + src + ", datanodes[" + j + "].getName()="

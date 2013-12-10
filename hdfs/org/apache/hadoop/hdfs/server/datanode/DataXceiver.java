@@ -1117,6 +1117,7 @@ class DataXceiver implements Runnable, FSConstants {
 		          NetUtils.getOutputStream(s, datanode.socketWriteTimeout));
 		  out.writeShort(DataTransferProtocol.OP_STATUS_SUCCESS);
 	      //out.writeLong(blockCrc);
+		  out.writeLong(0xFFFF);
 	      out.flush();
 	  } catch (IOException ioe) {
 			LOG.warn("Exception when getting Block CRC", ioe);
