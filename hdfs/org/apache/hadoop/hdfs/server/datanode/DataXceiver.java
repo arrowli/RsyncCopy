@@ -255,7 +255,7 @@ class DataXceiver implements Runnable, FSConstants {
           break;
         case DataTransferProtocol.OP_RSYNC_CHECKSUM:
           LOG.debug("RsyncCopy : Call OP_RSYNC_CHECKSUM");
-          getBlockChecksum(in, versionAndOpcode);
+          getBlockChecksumList(in, versionAndOpcode);
           break;
         default:
           throw new IOException("Unknown opcode " + op + " in data stream");
