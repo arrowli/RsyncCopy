@@ -129,7 +129,7 @@ public class RsyncCopy {
 
 	public Object namenodeProxySyncObj = new Object();
 	private final Path testPath = new Path("/test");
-	private final DistributedFileSystem dfs=null;
+	private final DistributedFileSystem dfs;
 
 	/**
 	 * Create a new DFSClient connected to the given nameNodeAddr or
@@ -143,6 +143,7 @@ public class RsyncCopy {
 		this.socketFactory = NetUtils.getSocketFactory(conf,
 				ClientProtocol.class);
 		this.localHost = InetAddress.getLocalHost();
+		this.dfs=DFSUtil.convertToDFS(testPath.getFileSystem(conf));
 		String taskId = conf.get("mapred.task.id");
 		if (taskId != null) {
 			this.clientName = "RsyncCopy_" + taskId + "_" + r.nextInt() + "_"
@@ -168,7 +169,6 @@ public class RsyncCopy {
                 HdfsConstants.READ_TIMEOUT);
 		this.namenodeRPCSocketTimeout = conf.getInt(
 				org.apache.hadoop.hdfs.protocol.FSConstants.DFS_CLIENT_NAMENODE_SOCKET_TIMEOUT, 0);
-		dfs=DFSUtil.convertToDFS(testPath.getFileSystem(conf));
 	}
 
 	/**
