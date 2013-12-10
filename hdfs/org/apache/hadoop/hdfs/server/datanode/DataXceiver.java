@@ -1110,6 +1110,7 @@ class DataXceiver implements Runnable, FSConstants {
    */
   void getBlockChecksumList(DataInputStream in,
 	      VersionAndOpcode versionAndOpcode) throws IOException{
+	  //start
 	  DataOutputStream out = null;
 	  try{
 		  out = new DataOutputStream(
