@@ -255,11 +255,7 @@ class DataXceiver implements Runnable, FSConstants {
           break;
         case DataTransferProtocol.OP_RSYNC_CHECKSUM:
           LOG.debug("RsyncCopy : Call OP_RSYNC_CHECKSUM");
-<<<<<<< HEAD
           getBlockChecksumList(in, versionAndOpcode);
-=======
-          getBlockChecksum(in, versionAndOpcode);
->>>>>>> refs/remotes/origin/master
           break;
         default:
           throw new IOException("Unknown opcode " + op + " in data stream");
@@ -1114,7 +1110,6 @@ class DataXceiver implements Runnable, FSConstants {
    */
   void getBlockChecksumList(DataInputStream in,
 	      VersionAndOpcode versionAndOpcode) throws IOException{
-<<<<<<< HEAD
 	  //start
 	  DataOutputStream out = null;
 	  try{
@@ -1123,15 +1118,6 @@ class DataXceiver implements Runnable, FSConstants {
 		  out.writeShort(DataTransferProtocol.OP_STATUS_SUCCESS);
 	      //out.writeLong(blockCrc);
 		  out.writeLong(0xFFFF);
-=======
-	  DataOutputStream out = null;
-	  try{
-		  
-		  out = new DataOutputStream(
-		          NetUtils.getOutputStream(s, datanode.socketWriteTimeout));
-		  out.writeShort(DataTransferProtocol.OP_STATUS_SUCCESS);
-	      //out.writeLong(blockCrc);
->>>>>>> refs/remotes/origin/master
 	      out.flush();
 	  } catch (IOException ioe) {
 			LOG.warn("Exception when getting Block CRC", ioe);
