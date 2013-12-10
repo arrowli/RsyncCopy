@@ -255,7 +255,7 @@ class DataXceiver implements Runnable, FSConstants {
           break;
         case DataTransferProtocol.OP_RSYNC_CHECKSUM:
           LOG.debug("RsyncCopy : Call OP_RSYNC_CHECKSUM");
-          getBlockChecksum(in, versionAndOpcode);
+          getBlockChecksumList(in, versionAndOpcode);
           break;
         default:
           throw new IOException("Unknown opcode " + op + " in data stream");
@@ -1112,7 +1112,6 @@ class DataXceiver implements Runnable, FSConstants {
 	      VersionAndOpcode versionAndOpcode) throws IOException{
 	  DataOutputStream out = null;
 	  try{
-		  
 		  out = new DataOutputStream(
 		          NetUtils.getOutputStream(s, datanode.socketWriteTimeout));
 		  out.writeShort(DataTransferProtocol.OP_STATUS_SUCCESS);
